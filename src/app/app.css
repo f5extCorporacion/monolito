@@ -1,0 +1,67 @@
+@import "tailwindcss";
+@plugin "daisyui";
+
+/* Temas personalizados */
+@plugin "daisyui/theme" {
+  name: "contactos-theme";
+  default: true;
+  prefersdark: false;
+  color-scheme: "light";
+  
+  /* Colores principales */
+  --color-primary: oklch(0.55 0.19 260);
+  --color-secondary: oklch(0.7 0.16 150);
+  --color-accent: oklch(0.75 0.18 30);
+  --color-neutral: oklch(0.3 0.02 260);
+  
+  /* Colores base */
+  --color-base-100: oklch(1 0 0);
+  --color-base-200: oklch(0.98 0.01 260);
+  --color-base-300: oklch(0.95 0.01 260);
+  
+  /* Colores de estado */
+  --color-success: oklch(0.65 0.18 140);
+  --color-warning: oklch(0.75 0.18 85);
+  --color-error: oklch(0.65 0.22 25);
+  --color-info: oklch(0.7 0.14 240);
+}
+
+/* Animaciones personalizadas */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideIn {
+  from { transform: translateX(-20px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+/* Clases utilitarias personalizadas */
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-out;
+}
+
+.animate-slide-in {
+  animation: slideIn 0.3s ease-out;
+}
+
+/* Scrollbar personalizada */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: oklch(0.95 0.01 260);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: oklch(0.8 0.02 260);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: oklch(0.7 0.03 260);
+}
