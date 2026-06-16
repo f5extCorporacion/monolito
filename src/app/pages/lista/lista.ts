@@ -4,13 +4,14 @@ import {
   FormBuilder,
   FormGroup,
   Validators,
-  ReactiveFormsModule
+  ReactiveFormsModule,
+  FormsModule
 } from '@angular/forms';
-import { FormsModule } from '@angular/forms'; // IMPORTANTE: Agregar FormsModule
 
 import { Subscription } from 'rxjs';
 import { ContactoService } from '../../services/contacto.service';
 import { Contacto } from '../../models/Contacto';
+import { supabase } from '../supabase.client';
 
 @Component({
   selector: 'app-lista',
@@ -18,7 +19,7 @@ import { Contacto } from '../../models/Contacto';
   imports: [
     CommonModule,
     ReactiveFormsModule,
-    FormsModule  // IMPORTANTE: Agregar FormsModule aquí
+    FormsModule
   ],
   templateUrl: './lista.html',
   styleUrl: './lista.css',
@@ -34,7 +35,6 @@ export class Lista implements OnInit, OnDestroy {
   error: string | null = null;
 
   validationErrors: { [key: string]: string[] } = {};
-
   serverErrors: string[] = [];
 
   contactoEditando: Contacto | null = null;
@@ -56,7 +56,6 @@ export class Lista implements OnInit, OnDestroy {
   ) {}
 
   ngOnInit(): void {
-
     this.formulario = this.fb.group({
       nombre: [
         '',
@@ -65,11 +64,7 @@ export class Lista implements OnInit, OnDestroy {
           Validators.minLength(2)
         ]
       ],
-
-      celular: [
-        ''
-      ],
-
+      celular: [''],
       email: [
         '',
         [
@@ -77,23 +72,24 @@ export class Lista implements OnInit, OnDestroy {
           Validators.email
         ]
       ],
-
       ubicacion: [
         '',
         Validators.required
       ],
-
-      estado: [
-        'activo'
-      ]
+      estado: ['activo']
     });
 
     this.obtenerUbicacion();
-
+    
+    // 1. Cargar datos iniciales
     this.cargar();
+
+    // 2. Escuchar cambios en tiempo real desde Supabase
+    this.escucharCambiosTiempoReal();
   }
 
   ngOnDestroy(): void {
+    // Esto limpia tanto las suscripciones HTTP/RxJS como la desconexión del canal de Supabase
     this.subscriptions.unsubscribe();
   }
 
@@ -102,7 +98,6 @@ export class Lista implements OnInit, OnDestroy {
   }
 
   obtenerUbicacion() {
-
     if (!navigator.geolocation) {
       this.error = 'El navegador no soporta geolocalización';
       return;
@@ -110,51 +105,82 @@ export class Lista implements OnInit, OnDestroy {
 
     navigator.geolocation.getCurrentPosition(
       (position) => {
-
         const lat = position.coords.latitude;
         const lng = position.coords.longitude;
 
         this.formulario.patchValue({
           ubicacion: `${lat}, ${lng}`
         });
-
       },
       (err) => {
-
         console.error(err);
-
-        this.error =
-          'No fue posible obtener la ubicación actual';
+        this.error = 'No fue posible obtener la ubicación actual';
       }
     );
   }
 
   cargar() {
-
     this.loading = true;
 
     const sub = this.contactoService
       .listar()
       .subscribe({
         next: (data) => {
-
           this.contactos = data;
           this.filtrarContactos();
           this.loading = false;
-
         },
         error: (err) => {
-
           console.error(err);
-
-          this.error =
-            'No se pudieron cargar los contactos';
-
+          this.error = 'No se pudieron cargar los contactos';
           this.loading = false;
         }
       });
 
     this.subscriptions.add(sub);
+  }
+
+  escucharCambiosTiempoReal() {
+    // Configura el canal de escucha para la tabla 'contactos'
+    const channel = supabase
+      .channel('cambios-contactos')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'contactos' },
+        (payload) => {
+          console.log('Cambio detectado en tiempo real:', payload);
+
+          switch (payload.eventType) {
+            case 'INSERT':
+              // Inserta el nuevo contacto arriba en la lista
+              this.contactos = [payload.new as Contacto, ...this.contactos];
+              break;
+
+            case 'UPDATE':
+              // Mapea la lista reemplazando únicamente el objeto editado
+              this.contactos = this.contactos.map(contacto =>
+                contacto.id === payload.new.id ? (payload.new as Contacto) : contacto
+              );
+              break;
+
+            case 'DELETE':
+              // Filtra quitando el elemento eliminado de la lista local
+              this.contactos = this.contactos.filter(contacto =>
+                contacto.id !== payload.old.id
+              );
+              break;
+          }
+
+          // Re-calcula la búsqueda, filtros y paginación dinámicamente
+          this.filtrarContactos();
+        }
+      )
+      .subscribe();
+
+    // Agregamos una desuscripción manual al pool de subscripciones de RxJS
+    this.subscriptions.add(new Subscription(() => {
+      supabase.removeChannel(channel);
+    }));
   }
 
   // Método para filtrar contactos por búsqueda
@@ -170,58 +196,49 @@ export class Lista implements OnInit, OnDestroy {
       );
     }
     
-    // Resetear a la primera página cuando se filtra
     this.paginaActual = 1;
     this.calcularTotalPaginas();
   }
 
-  // Método para actualizar el término de búsqueda
   buscarContactos(event: Event) {
     this.terminoBusqueda = (event.target as HTMLInputElement).value;
     this.filtrarContactos();
   }
 
-  // Método para limpiar la búsqueda
   limpiarBusqueda() {
     this.terminoBusqueda = '';
     this.filtrarContactos();
   }
 
-  // Calcular total de páginas
   calcularTotalPaginas() {
     this.totalPaginas = Math.ceil(this.contactosFiltrados.length / this.elementosPorPagina);
     if (this.totalPaginas === 0) this.totalPaginas = 1;
   }
 
-  // Obtener contactos de la página actual
   get contactosPaginaActual(): Contacto[] {
     const inicio = (this.paginaActual - 1) * this.elementosPorPagina;
     const fin = inicio + this.elementosPorPagina;
     return this.contactosFiltrados.slice(inicio, fin);
   }
 
-  // Cambiar de página
   cambiarPagina(pagina: number) {
     if (pagina >= 1 && pagina <= this.totalPaginas) {
       this.paginaActual = pagina;
     }
   }
 
-  // Página anterior
   paginaAnterior() {
     if (this.paginaActual > 1) {
       this.paginaActual--;
     }
   }
 
-  // Página siguiente
   paginaSiguiente() {
     if (this.paginaActual < this.totalPaginas) {
       this.paginaActual++;
     }
   }
 
-  // Obtener array de páginas para mostrar
   get paginas(): number[] {
     const paginas: number[] = [];
     const maxPaginasMostradas = 5;
@@ -240,17 +257,14 @@ export class Lista implements OnInit, OnDestroy {
     return paginas;
   }
 
-  // Método para calcular el inicio de la paginación (reemplaza Math.min en el template)
   getInicioPaginacion(): number {
     return (this.paginaActual - 1) * this.elementosPorPagina + 1;
   }
 
-  // Método para calcular el fin de la paginación (reemplaza Math.min en el template)
   getFinPaginacion(): number {
     return Math.min(this.paginaActual * this.elementosPorPagina, this.contactosFiltrados.length);
   }
 
-  // Método para cambiar elementos por página
   cambiarElementosPorPagina(event: Event) {
     const select = event.target as HTMLSelectElement;
     this.elementosPorPagina = parseInt(select.value, 10);
@@ -259,78 +273,49 @@ export class Lista implements OnInit, OnDestroy {
   }
 
   guardar() {
-
     if (this.formulario.invalid) {
-
       this.formulario.markAllAsTouched();
-
       return;
     }
 
     this.loading = true;
-
     this.validationErrors = {};
     this.serverErrors = [];
 
-    const contacto: Contacto =
-      this.formulario.value;
-
-    // Determinar si es creación o actualización
+    const contacto: Contacto = this.formulario.value;
     let request;
 
     if (this.esModoEdicion && this.contactoEditando) {
-      // Modo actualización
       request = this.contactoService.actualizar(this.contactoEditando.id!, contacto);
     } else {
-      // Modo creación
       request = this.contactoService.crear(contacto);
     }
 
     const sub = request.subscribe({
-
       next: () => {
-
         this.formulario.reset({
           estado: 'activo'
         });
 
         this.obtenerUbicacion();
-
-        this.cargar();
-
         this.cerrarModal();
-        
         this.resetModoEdicion();
-
         this.loading = false;
+        
+        // NOTA: 'this.cargar()' ya no es estrictamente necesario aquí 
+        // porque el WebSocket de Realtime detectará el cambio y pintará la UI.
       },
-
       error: (err) => {
-
         console.error(err);
-
         this.loading = false;
 
         if (err.error?.message) {
-
-          if (
-            Array.isArray(
-              err.error.message
-            )
-          ) {
-
-            err.error.message.forEach(
-              (msg: string) => {
-
-                this.processErrorMessage(msg);
-
-              }
-            );
-
+          if (Array.isArray(err.error.message)) {
+            err.error.message.forEach((msg: string) => {
+              this.processErrorMessage(msg);
+            });
           } else {
-
-            this.error =
-              err.error.message;
+            this.error = err.error.message;
           }
         }
       }
@@ -339,12 +324,10 @@ export class Lista implements OnInit, OnDestroy {
     this.subscriptions.add(sub);
   }
 
-  // Método para editar contacto
   editar(contacto: Contacto) {
     this.esModoEdicion = true;
     this.contactoEditando = contacto;
     
-    // Cargar los datos del contacto en el formulario
     this.formulario.patchValue({
       nombre: contacto.nombre,
       celular: contacto.celular,
@@ -356,78 +339,50 @@ export class Lista implements OnInit, OnDestroy {
     this.abrirModal();
   }
 
-  // Método para resetear el modo de edición
   resetModoEdicion() {
     this.esModoEdicion = false;
     this.contactoEditando = null;
   }
 
   processErrorMessage(msg: string) {
-
-    const fieldMatch =
-      msg.match(/^(\w+)\s+/);
+    const fieldMatch = msg.match(/^(\w+)\s+/);
 
     if (fieldMatch) {
-
-      const field =
-        fieldMatch[1];
-
-      if (
-        !this.validationErrors[field]
-      ) {
-
-        this.validationErrors[field] =
-          [];
+      const field = fieldMatch[1];
+      if (!this.validationErrors[field]) {
+        this.validationErrors[field] = [];
       }
-
-      this.validationErrors[field]
-        .push(msg);
-
+      this.validationErrors[field].push(msg);
     } else {
-
       this.serverErrors.push(msg);
     }
   }
 
   eliminar(id: number) {
-
-    if (
-      !confirm(
-        '¿Eliminar contacto?'
-      )
-    ) {
+    if (!confirm('¿Eliminar contacto?')) {
       return;
     }
 
-    const sub =
-      this.contactoService
-        .eliminar(id)
-        .subscribe({
-
-          next: () => {
-
-            this.cargar();
-          },
-
-          error: (err) => {
-
-            console.error(err);
-
-            this.error =
-              'Error al eliminar';
-          }
-        });
+    const sub = this.contactoService
+      .eliminar(id)
+      .subscribe({
+        next: () => {
+          // NOTA: 'this.cargar()' removido de aquí ya que Realtime
+          // se encargará de remover el elemento visualmente de inmediato.
+        },
+        error: (err) => {
+          console.error(err);
+          this.error = 'Error al eliminar';
+        }
+      });
 
     this.subscriptions.add(sub);
   }
 
   abrirModal() {
-
-    // Resetear errores
     this.validationErrors = {};
     this.serverErrors = [];
     
-    // Si no es modo edición, resetear formulario y obtener ubicación
     if (!this.esModoEdicion) {
       this.formulario.reset({
         estado: 'activo'
@@ -435,56 +390,31 @@ export class Lista implements OnInit, OnDestroy {
       this.obtenerUbicacion();
     }
 
-    const modal =
-      document.getElementById(
-        'modal_contacto'
-      ) as HTMLDialogElement;
-
+    const modal = document.getElementById('modal_contacto') as HTMLDialogElement;
     modal?.showModal();
   }
 
   cerrarModal() {
-
-    const modal =
-      document.getElementById(
-        'modal_contacto'
-      ) as HTMLDialogElement;
-
+    const modal = document.getElementById('modal_contacto') as HTMLDialogElement;
     modal?.close();
-    
-    // Resetear modo edición al cerrar el modal
     this.resetModoEdicion();
   }
 
-  getFieldError(
-    field: string
-  ): string | null {
-
-    if (
-      this.validationErrors[field]
-    ) {
-
+  getFieldError(field: string): string | null {
+    if (this.validationErrors[field]) {
       return this.validationErrors[field][0];
     }
-
     return null;
   }
 
-  hasError(
-    field: string
-  ): boolean {
-
-    return (
-      !!this.validationErrors[field]
-    );
+  hasError(field: string): boolean {
+    return (!!this.validationErrors[field]);
   }
 
-  // Método para obtener el título del modal
   getTituloModal(): string {
     return this.esModoEdicion ? 'Editar Contacto' : 'Nuevo Contacto';
   }
 
-  // Método para obtener el texto del botón
   getTextoBoton(): string {
     return this.esModoEdicion ? 'Actualizar' : 'Guardar';
   }
