@@ -1,16 +1,14 @@
 import { Injectable } from '@angular/core';
 import { from, map, Observable } from 'rxjs';
 import { Contacto } from '../models/Contacto';
-import { supabase } from '../supabase.client';
+import { supabase } from '../supabase.client'; // <--- Este cliente ya lleva las llaves puestas
 
 @Injectable({
   providedIn: 'root'
 })
 export class ContactoService {
-
   constructor() {}
 
-  // Listar todos los contactos
   listar(): Observable<Contacto[]> {
     return from(
       supabase
@@ -19,10 +17,7 @@ export class ContactoService {
         .order('id', { ascending: false })
     ).pipe(
       map(({ data, error }) => {
-        if (error) {
-          throw error;
-        }
-
+        if (error) throw error;
         return (data || []) as Contacto[];
       })
     );
