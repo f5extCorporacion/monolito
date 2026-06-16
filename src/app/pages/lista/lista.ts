@@ -11,7 +11,7 @@ import {
 import { Subscription } from 'rxjs';
 import { ContactoService } from '../../services/contacto.service';
 import { Contacto } from '../../models/Contacto';
-import { supabase } from '../supabase.client';
+import { supabase } from '../../supabase.client';
 
 @Component({
   selector: 'app-lista',
