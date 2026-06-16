@@ -56,6 +56,11 @@ export class Lista implements OnInit, OnDestroy {
   ) {}
 
   ngOnInit(): void {
+    // 1. Inicializar arrays explícitamente (evita undefined en filtrarContactos)
+    this.contactos = [];
+    this.contactosFiltrados = [];
+
+    // 2. Construir formulario
     this.formulario = this.fb.group({
       nombre: [
         '',
@@ -79,17 +84,17 @@ export class Lista implements OnInit, OnDestroy {
       estado: ['activo']
     });
 
-    this.obtenerUbicacion();
-    
-    // 1. Cargar datos iniciales
+    // 3. Cargar lista PRIMERO — esto pinta la tabla de inmediato
     this.cargar();
 
-    // 2. Escuchar cambios en tiempo real desde Supabase
+    // 4. Pedir geolocalización en paralelo (no bloquea la carga)
+    this.obtenerUbicacion();
+
+    // 5. Suscribirse a cambios en tiempo real DESPUÉS de la carga inicial
     this.escucharCambiosTiempoReal();
   }
 
   ngOnDestroy(): void {
-    // Esto limpia tanto las suscripciones HTTP/RxJS como la desconexión del canal de Supabase
     this.subscriptions.unsubscribe();
   }
 
@@ -121,18 +126,25 @@ export class Lista implements OnInit, OnDestroy {
 
   cargar() {
     this.loading = true;
+    this.error = null; // limpiar error previo antes de cada intento
 
     const sub = this.contactoService
       .listar()
       .subscribe({
         next: (data) => {
-          this.contactos = data;
+          // Garantiza que nunca se asigne null o undefined
+          this.contactos = data ?? [];
+          // filtrarContactos recalcula contactosFiltrados y la paginación
           this.filtrarContactos();
           this.loading = false;
         },
         error: (err) => {
           console.error(err);
           this.error = 'No se pudieron cargar los contactos';
+          // Dejar los arrays vacíos para no mostrar datos corruptos
+          this.contactos = [];
+          this.contactosFiltrados = [];
+          this.calcularTotalPaginas();
           this.loading = false;
         }
       });
@@ -141,7 +153,6 @@ export class Lista implements OnInit, OnDestroy {
   }
 
   escucharCambiosTiempoReal() {
-    // Configura el canal de escucha para la tabla 'contactos'
     const channel = supabase
       .channel('cambios-contactos')
       .on(
@@ -152,39 +163,40 @@ export class Lista implements OnInit, OnDestroy {
 
           switch (payload.eventType) {
             case 'INSERT':
-              // Inserta el nuevo contacto arriba en la lista
               this.contactos = [payload.new as Contacto, ...this.contactos];
               break;
 
             case 'UPDATE':
-              // Mapea la lista reemplazando únicamente el objeto editado
               this.contactos = this.contactos.map(contacto =>
                 contacto.id === payload.new.id ? (payload.new as Contacto) : contacto
               );
               break;
 
             case 'DELETE':
-              // Filtra quitando el elemento eliminado de la lista local
               this.contactos = this.contactos.filter(contacto =>
                 contacto.id !== payload.old.id
               );
               break;
           }
 
-          // Re-calcula la búsqueda, filtros y paginación dinámicamente
           this.filtrarContactos();
         }
       )
       .subscribe();
 
-    // Agregamos una desuscripción manual al pool de subscripciones de RxJS
     this.subscriptions.add(new Subscription(() => {
       supabase.removeChannel(channel);
     }));
   }
 
-  // Método para filtrar contactos por búsqueda
   filtrarContactos() {
+    // Guarda contra arrays no inicializados
+    if (!this.contactos) {
+      this.contactosFiltrados = [];
+      this.calcularTotalPaginas();
+      return;
+    }
+
     if (!this.terminoBusqueda.trim()) {
       this.contactosFiltrados = [...this.contactos];
     } else {
@@ -195,7 +207,7 @@ export class Lista implements OnInit, OnDestroy {
         (contacto.celular?.includes(termino) || false)
       );
     }
-    
+
     this.paginaActual = 1;
     this.calcularTotalPaginas();
   }
@@ -242,18 +254,18 @@ export class Lista implements OnInit, OnDestroy {
   get paginas(): number[] {
     const paginas: number[] = [];
     const maxPaginasMostradas = 5;
-    
+
     let inicio = Math.max(1, this.paginaActual - Math.floor(maxPaginasMostradas / 2));
     let fin = Math.min(this.totalPaginas, inicio + maxPaginasMostradas - 1);
-    
+
     if (fin - inicio + 1 < maxPaginasMostradas) {
       inicio = Math.max(1, fin - maxPaginasMostradas + 1);
     }
-    
+
     for (let i = inicio; i <= fin; i++) {
       paginas.push(i);
     }
-    
+
     return paginas;
   }
 
@@ -262,7 +274,10 @@ export class Lista implements OnInit, OnDestroy {
   }
 
   getFinPaginacion(): number {
-    return Math.min(this.paginaActual * this.elementosPorPagina, this.contactosFiltrados.length);
+    return Math.min(
+      this.paginaActual * this.elementosPorPagina,
+      this.contactosFiltrados.length
+    );
   }
 
   cambiarElementosPorPagina(event: Event) {
@@ -293,17 +308,12 @@ export class Lista implements OnInit, OnDestroy {
 
     const sub = request.subscribe({
       next: () => {
-        this.formulario.reset({
-          estado: 'activo'
-        });
-
+        this.formulario.reset({ estado: 'activo' });
         this.obtenerUbicacion();
         this.cerrarModal();
         this.resetModoEdicion();
         this.loading = false;
-        
-        // NOTA: 'this.cargar()' ya no es estrictamente necesario aquí 
-        // porque el WebSocket de Realtime detectará el cambio y pintará la UI.
+        // Realtime se encarga de reflejar el cambio en la lista automáticamente
       },
       error: (err) => {
         console.error(err);
@@ -327,7 +337,7 @@ export class Lista implements OnInit, OnDestroy {
   editar(contacto: Contacto) {
     this.esModoEdicion = true;
     this.contactoEditando = contacto;
-    
+
     this.formulario.patchValue({
       nombre: contacto.nombre,
       celular: contacto.celular,
@@ -335,7 +345,7 @@ export class Lista implements OnInit, OnDestroy {
       ubicacion: contacto.ubicacion,
       estado: contacto.estado || 'activo'
     });
-    
+
     this.abrirModal();
   }
 
@@ -367,8 +377,7 @@ export class Lista implements OnInit, OnDestroy {
       .eliminar(id)
       .subscribe({
         next: () => {
-          // NOTA: 'this.cargar()' removido de aquí ya que Realtime
-          // se encargará de remover el elemento visualmente de inmediato.
+          // Realtime elimina el elemento de la lista automáticamente
         },
         error: (err) => {
           console.error(err);
@@ -382,11 +391,9 @@ export class Lista implements OnInit, OnDestroy {
   abrirModal() {
     this.validationErrors = {};
     this.serverErrors = [];
-    
+
     if (!this.esModoEdicion) {
-      this.formulario.reset({
-        estado: 'activo'
-      });
+      this.formulario.reset({ estado: 'activo' });
       this.obtenerUbicacion();
     }
 
@@ -408,7 +415,7 @@ export class Lista implements OnInit, OnDestroy {
   }
 
   hasError(field: string): boolean {
-    return (!!this.validationErrors[field]);
+    return !!this.validationErrors[field];
   }
 
   getTituloModal(): string {
