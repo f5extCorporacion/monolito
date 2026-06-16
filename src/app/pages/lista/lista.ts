@@ -124,33 +124,29 @@ export class Lista implements OnInit, OnDestroy {
     );
   }
 
-  cargar() {
-    this.loading = true;
-    this.error = null; // limpiar error previo antes de cada intento
+ cargar() {
+  this.loadingLista = true;  // ← este, no loading
+  this.error = null;
 
-    const sub = this.contactoService
-      .listar()
-      .subscribe({
-        next: (data) => {
-          // Garantiza que nunca se asigne null o undefined
-          this.contactos = data ?? [];
-          // filtrarContactos recalcula contactosFiltrados y la paginación
-          this.filtrarContactos();
-          this.loading = false;
-        },
-        error: (err) => {
-          console.error(err);
-          this.error = 'No se pudieron cargar los contactos';
-          // Dejar los arrays vacíos para no mostrar datos corruptos
-          this.contactos = [];
-          this.contactosFiltrados = [];
-          this.calcularTotalPaginas();
-          this.loading = false;
-        }
-      });
+  const sub = this.contactoService.listar().subscribe({
+    next: (data) => {
+      this.contactos = data ?? [];
+      this.filtrarContactos();
+      this.loadingLista = false;  // ← este
+      this.escucharCambiosTiempoReal();
+    },
+    error: (err) => {
+      this.error = 'No se pudieron cargar los contactos';
+      this.contactos = [];
+      this.contactosFiltrados = [];
+      this.calcularTotalPaginas();
+      this.loadingLista = false;  // ← este
+      this.escucharCambiosTiempoReal();
+    }
+  });
 
-    this.subscriptions.add(sub);
-  }
+  this.subscriptions.add(sub);
+}
 
   escucharCambiosTiempoReal() {
     const channel = supabase
