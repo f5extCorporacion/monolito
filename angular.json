@@ -19,6 +19,7 @@
           "options": {
             "browser": "src/main.ts",
             "tsConfig": "tsconfig.app.json",
+           
             "assets": [
               {
                 "glob": "**/*",
@@ -35,9 +36,6 @@
             },
             "ssr": {
               "entry": "src/server.ts"
-            },
-            "outputPath": {
-              "base": "dist/monolito"
             }
           },
           "configurations": {
@@ -57,13 +55,7 @@
               "outputHashing": "all",
               "optimization": true,
               "sourceMap": false,
-              "extractLicenses": true,
-              "fileReplacements": [
-                {
-                  "src": "src/environments/environment.ts",
-                  "replace": "src/environments/environment.prod.ts"
-                }
-              ]
+              "extractLicenses": true
             },
             "development": {
               "optimization": false,
