@@ -35,6 +35,9 @@
             },
             "ssr": {
               "entry": "src/server.ts"
+            },
+            "outputPath": {
+              "base": "dist/monolito"
             }
           },
           "configurations": {
@@ -54,7 +57,13 @@
               "outputHashing": "all",
               "optimization": true,
               "sourceMap": false,
-              "extractLicenses": true
+              "extractLicenses": true,
+              "fileReplacements": [
+                {
+                  "src": "src/environments/environment.ts",
+                  "replace": "src/environments/environment.prod.ts"
+                }
+              ]
             },
             "development": {
               "optimization": false,
